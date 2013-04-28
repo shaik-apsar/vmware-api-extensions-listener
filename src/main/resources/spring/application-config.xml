@@ -1,0 +1,96 @@
+<beans:beans xmlns="http://www.springframework.org/schema/integration"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:beans="http://www.springframework.org/schema/beans"
+	xmlns:si-amqp="http://www.springframework.org/schema/integration/amqp"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xmlns:si-http="http://www.springframework.org/schema/integration/http"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:mvc="http://www.springframework.org/schema/mvc"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xmlns:jee="http://www.springframework.org/schema/jee"
+	xmlns:oxm="http://www.springframework.org/schema/oxm"
+	xmlns:int-jdbc="http://www.springframework.org/schema/integration/jdbc"
+	xmlns:int-xml="http://www.springframework.org/schema/integration/xml"
+	xsi:schemaLocation="http://www.springframework.org/schema/integration/xml http://www.springframework.org/schema/integration/xml/spring-integration-xml-2.2.xsd
+		http://www.springframework.org/schema/integration/amqp http://www.springframework.org/schema/integration/amqp/spring-integration-amqp-2.2.xsd
+		http://www.springframework.org/schema/jdbc http://www.springframework.org/schema/jdbc/spring-jdbc-3.1.xsd
+		http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee-3.1.xsd
+		http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc-3.1.xsd
+		http://www.springframework.org/schema/oxm http://www.springframework.org/schema/oxm/spring-oxm-3.1.xsd
+		http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.1.xsd
+		http://www.springframework.org/schema/integration/jdbc http://www.springframework.org/schema/integration/jdbc/spring-integration-jdbc-2.2.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+		http://www.springframework.org/schema/integration/http http://www.springframework.org/schema/integration/http/spring-integration-http-2.2.xsd
+		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-3.1.xsd
+		http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration-2.2.xsd
+		http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-3.1.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.1.xsd">
+
+	<util:properties id="rabbitConfig" location="classpath:rabbit-mq-config.properties" />
+
+	<util:properties id="httpConfig" location="classpath:http-component-config.properties" />
+
+	<util:properties id="appConfig" location="classpath:application-config.properties" />
+
+	<context:annotation-config />
+	
+	<task:annotation-driven/>
+	
+	<context:component-scan base-package="com.shaikapsar.vmware.api.extensions.listener" />
+
+	<!-- Enable the @AspectJ support -->
+	<aop:aspectj-autoproxy />
+
+	<!-- enable message history -->
+	<message-history tracked-components="*" />
+
+	<!-- Global logging configuration start -->
+
+	<channel id="loggingChannel" />
+
+	<logging-channel-adapter id="loggingChannelAdapter" channel="loggingChannel" log-full-message="true" level="DEBUG" />
+
+	<channel-interceptor pattern="*" order="3">
+		<beans:bean class="org.springframework.integration.channel.interceptor.WireTap">
+			<beans:constructor-arg ref="loggingChannel" />
+		</beans:bean>
+	</channel-interceptor>
+
+	<!-- Global logging configuration ends -->
+	
+	<!-- Consumers status configuration start -->
+	
+	<inbound-channel-adapter id="consumersStatusCron" channel="consumers" method="consumersUris" ref="consumersStatusSerivce">
+		<poller cron="#{appConfig['app.consumerStatusCron']}" />
+	</inbound-channel-adapter>
+	
+	<channel id="consumers" />
+	
+	<splitter id="consumerUrisSplitter" input-channel="consumers" output-channel="consumersSplitter" expression="payload"/>
+			
+	<channel id="consumersSplitter"/>
+	
+	<outbound-channel-adapter id="consumerStatusOutboundChannelAdapter" channel="consumersSplitter" method="consumerStatus" ref="consumersStatusSerivce" auto-startup="true"/>	
+	 
+	<!-- Consumers status configuration end -->
+
+	<!-- configuration to connect queues start -->
+
+	<si-amqp:inbound-channel-adapter id="amqpInbound" auto-startup="true" message-converter="notificationMessageConverter" channel="notification" 
+		listener-container="listenerContainer" mapped-request-headers="*" />
+
+	<!--configuration to connect queues end -->
+
+	<channel id="notification" datatype="com.shaikapsar.vmware.api.extensions.listener.model.Notification" />
+	
+	<chain id="notificationChain" input-channel="notification" auto-startup="true" output-channel="processedNotification">
+		<service-activator ref="extensionService" method="execute" />
+	 </chain>
+	
+	 <channel id="processedNotification"/>
+	 
+	 <outbound-channel-adapter id="publisherServiceOutboundChannelAdapter" auto-startup="true" channel="processedNotification" ref="publisherService" method="publish" />	
+
+</beans:beans>
